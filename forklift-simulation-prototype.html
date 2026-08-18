@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Forklift Simulation — Activity Prototype</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap');
+
+  :root{
+    --steel:#1b1c1e;
+    --panel:#edeae3;
+    --panel-line:#d8d3c6;
+    --yellow:#f4b400;
+    --orange:#e8590c;
+    --alert:#c0392b;
+    --success:#3a8f5e;
+    --ink:#1b1c1e;
+    --paper:#f7f5f0;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;background:var(--steel);font-family:'Inter',sans-serif;color:var(--ink);overflow:hidden;}
+
+  .stage{display:grid; grid-template-columns:1fr 320px; height:100vh; background:var(--steel);}
+
+  #viewport{position:relative; overflow:hidden; background:radial-gradient(circle at 50% 30%, #55534b 0%, #302f2a 75%);}
+  #viewport canvas{display:block;}
+  .hazard-frame{position:absolute; inset:0; pointer-events:none; box-shadow:inset 0 0 0 6px var(--yellow);}
+
+  .hud-top{position:absolute; top:0; left:0; right:0; display:flex; justify-content:space-between; padding:16px 20px; pointer-events:none;}
+  .hud-title{font-family:'Bebas Neue',sans-serif; font-size:26px; letter-spacing:2px; color:var(--paper); text-shadow:0 2px 6px rgba(0,0,0,.6);}
+  .hud-title span{color:var(--yellow);}
+  .hud-sub{font-size:10.5px; letter-spacing:1.5px; text-transform:uppercase; color:#c9c6bc; margin-top:2px;}
+  .hud-right{display:flex; gap:18px;}
+  .hud-stat{text-align:right; font-family:'JetBrains Mono',monospace; color:var(--paper); text-shadow:0 2px 6px rgba(0,0,0,.6);}
+  .hud-stat .big{font-size:24px; font-weight:700; color:var(--yellow);}
+  .hud-stat.alert .big{color:#ff8a75;}
+  .hud-stat .lbl{font-size:9.5px; letter-spacing:1.5px; text-transform:uppercase; color:#c9c6bc;}
+
+  .minimap-frame{position:absolute; border:2px solid var(--yellow); border-radius:6px; box-shadow:0 4px 14px rgba(0,0,0,.5); pointer-events:none; overflow:hidden;}
+  .minimap-frame .mm-label{position:absolute; top:0; left:0; right:0; font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:1.5px; text-align:center; color:#1b1c1e; background:var(--yellow); padding:2px 0; text-transform:uppercase; font-weight:700;}
+  .drag-hint{position:absolute; font-family:'Inter',sans-serif; font-size:10px; color:#c9c6bc; text-align:center; pointer-events:none; text-shadow:0 1px 4px rgba(0,0,0,.6);}
+  #viewport.dragging{cursor:grabbing;}
+  #viewport{cursor:grab;}
+
+  .indicator-row{position:absolute; top:70px; left:20px; display:flex; gap:8px; pointer-events:none;}
+  .pill{font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:.5px; padding:4px 9px; border-radius:20px; background:rgba(27,28,30,.7); color:#9a988f; border:1px solid #4a4944;}
+  .pill.on{color:#1b1c1e; background:var(--yellow); border-color:var(--yellow); font-weight:700;}
+  .pill.carrying{color:#fff; background:var(--orange); border-color:var(--orange); font-weight:700;}
+
+  .toast-log{position:absolute; left:20px; bottom:118px; right:20px; display:flex; flex-direction:column-reverse; gap:6px; pointer-events:none; max-height:150px;}
+  .toast{align-self:flex-start; font-family:'JetBrains Mono',monospace; font-size:11.5px; padding:6px 11px; border-radius:2px; background:rgba(27,28,30,.88); border-left:3px solid var(--success); color:var(--paper); animation:slidein .2s ease-out;}
+  .toast.warn{border-left-color:var(--alert); color:#ffd9d3;}
+  .toast.info{border-left-color:var(--yellow); color:#fff3d0;}
+  @keyframes slidein{from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:none;}}
+
+  /* on-screen controls (touch + click fallback) */
+  .onscreen{position:absolute; left:0; right:0; bottom:0; display:flex; justify-content:space-between; align-items:flex-end; padding:16px 20px; pointer-events:none;}
+  .dpad{display:grid; grid-template-columns:44px 44px 44px; grid-template-rows:44px 44px 44px; gap:4px; pointer-events:auto;}
+  .dpad button{grid-column:auto; all:unset; cursor:pointer; background:rgba(27,28,30,.8); border:1px solid #56544c; border-radius:6px; color:var(--paper); display:flex; align-items:center; justify-content:center; font-size:16px; user-select:none;}
+  .dpad button:active, .dpad button.pressed{background:var(--yellow); color:#1b1c1e;}
+  .dpad .up{grid-column:2; grid-row:1;}
+  .dpad .left{grid-column:1; grid-row:2;}
+  .dpad .right{grid-column:3; grid-row:2;}
+  .dpad .down{grid-column:2; grid-row:3;}
+  .dpad .center{grid-column:2; grid-row:2; background:transparent; border:none;}
+
+  .actionpad{display:flex; flex-direction:column; gap:6px; pointer-events:auto;}
+  .actionpad button{all:unset; cursor:pointer; min-width:118px; text-align:center; padding:9px 14px; border-radius:5px; font-family:'Inter',sans-serif; font-weight:700; font-size:12px; letter-spacing:.3px; background:rgba(27,28,30,.85); border:1px solid #56544c; color:var(--paper); user-select:none;}
+  .actionpad button.engine.on{background:var(--yellow); color:#1b1c1e; border-color:var(--yellow);}
+  .actionpad button.attach{background:var(--orange); border-color:var(--orange); color:#fff;}
+  .actionpad .liftrow{display:flex; gap:6px;}
+  .actionpad .liftrow button{min-width:56px; flex:1;}
+  .actionpad button:active, .actionpad button.pressed{filter:brightness(1.25);}
+
+  /* ---------- PANEL ---------- */
+  #panel{background:var(--panel); border-left:6px solid var(--yellow); display:flex; flex-direction:column; overflow-y:auto;}
+  .panel-head{padding:20px 20px 14px; border-bottom:1px solid var(--panel-line);}
+  .eyebrow{font-size:10px; letter-spacing:2px; text-transform:uppercase; color:var(--orange); font-weight:700; margin-bottom:4px;}
+  .panel-head h1{font-family:'Bebas Neue',sans-serif; font-size:24px; letter-spacing:1px; margin:0 0 6px;}
+  .panel-head p{margin:0; font-size:12.5px; color:#5c5a53; line-height:1.55;}
+
+  .legend{margin:16px 20px; padding:12px 14px; border-radius:4px; background:#232324;}
+  .legend h3{margin:0 0 8px; font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:#8a887f;}
+  .legend-row{display:flex; justify-content:space-between; font-size:12px; color:#d8d5c8; padding:3px 0;}
+  .legend-row kbd{font-family:'JetBrains Mono',monospace; font-size:10.5px; background:#3a3a37; border:1px solid #56544c; border-radius:3px; padding:1px 6px; color:#f4b400;}
+
+  .divider{height:1px; background:var(--panel-line); margin:14px 20px;}
+
+  .scorebar{display:flex; justify-content:space-between; padding:0 20px; margin-bottom:6px;}
+  .score-box .val{font-family:'JetBrains Mono',monospace; font-size:22px; font-weight:700;}
+  .score-box .val.alert{color:var(--alert);}
+  .score-box .val.ok{color:var(--success);}
+  .score-box .lbl{font-size:10px; letter-spacing:1.2px; text-transform:uppercase; color:#8a887f;}
+
+  #restart{margin:14px 20px 8px;}
+  button.act{all:unset; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:10px 14px; border-radius:3px; background:var(--paper); border:1px solid var(--panel-line); font-family:'Inter',sans-serif; font-size:13px; font-weight:700; color:var(--ink); width:100%;}
+  button.act:hover{border-color:var(--orange);}
+
+  .result-banner{margin:8px 20px 4px; padding:12px 14px; border-radius:3px; background:#1b1c1e; color:var(--paper); display:none;}
+  .result-banner.show{display:block;}
+  .result-banner .rank{font-family:'Bebas Neue',sans-serif; font-size:22px; letter-spacing:1px; color:var(--yellow);}
+  .result-banner p{margin:4px 0 0; font-size:12px; color:#c9c6bc; line-height:1.5;}
+
+  .activity-log{margin:0 20px 20px; flex:1;}
+  .activity-log h3{font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:#8a887f; margin:0 0 6px;}
+  .log-list{font-family:'JetBrains Mono',monospace; font-size:11px; color:#4a4944; display:flex; flex-direction:column-reverse; gap:4px; max-height:220px; overflow-y:auto;}
+  .log-list div.warn{color:var(--alert);}
+  .log-list div.ok{color:var(--success);}
+
+  /* briefing modal */
+  #briefing{position:fixed; inset:0; background:rgba(15,15,14,.86); display:flex; align-items:center; justify-content:center; z-index:50;}
+  .brief-card{background:var(--paper); width:min(480px,88vw); border-radius:5px; border-top:6px solid var(--yellow); padding:26px 26px 22px;}
+  .brief-card .eyebrow{margin-bottom:2px;}
+  .brief-card h2{font-family:'Bebas Neue',sans-serif; font-size:28px; letter-spacing:1px; margin:2px 0 12px;}
+  .brief-card p{font-size:13.5px; line-height:1.6; color:#3a3936; margin:0 0 10px;}
+  .brief-card ul{margin:0 0 16px; padding-left:18px; font-size:12.5px; color:#5c5a53; line-height:1.7;}
+  .brief-card button{all:unset; cursor:pointer; display:block; width:100%; text-align:center; padding:12px; border-radius:4px; background:var(--orange); color:#fff; font-weight:700; letter-spacing:.5px; font-size:13px;}
+
+  ::-webkit-scrollbar{width:7px;}
+  ::-webkit-scrollbar-thumb{background:#c9c4b3; border-radius:4px;}
+</style>
+</head>
+<body>
+
+<div id="briefing">
+  <div class="brief-card">
+    <div class="eyebrow">Scenario Briefing</div>
+    <h2>Deliver the Pallet</h2>
+    <p>A loaded pallet is sitting in the <b>yellow zone</b>. Your job is to get it safely into the <b>green bay</b>. Nothing on screen will tell you what to do next — you're expected to know the routine and run it yourself.</p>
+    <ul>
+      <li>Nothing moves until the engine is running.</li>
+      <li>The forks have to be down and lined up before a load will attach.</li>
+      <li>Driving with a raised load is marked as unsafe.</li>
+      <li>Releasing outside the bay drops the load — you'll need to recover it.</li>
+    </ul>
+    <button id="beginBtn">Start Shift</button>
+  </div>
+</div>
+
+<div class="stage">
+  <div id="viewport">
+    <div class="hazard-frame"></div>
+    <div class="hud-top">
+      <div>
+        <div class="hud-title">FORKLIFT <span>SIM</span></div>
+        <div class="hud-sub">Activity 4 · 3D Training Module</div>
+      </div>
+      <div class="hud-right">
+        <div class="hud-stat"><div class="big" id="hudTime">00:00</div><div class="lbl">Elapsed</div></div>
+        <div class="hud-stat" id="hudScoreWrap"><div class="big" id="hudScore">100</div><div class="lbl">Score</div></div>
+      </div>
+    </div>
+    <div class="indicator-row">
+      <div class="pill" id="pillEngine">ENGINE OFF</div>
+      <div class="pill" id="pillLoad">NO LOAD</div>
+    </div>
+    <div class="toast-log" id="toastLog"></div>
+
+    <div class="minimap-frame" id="minimapFrame">
+      <div class="mm-label">Map</div>
+    </div>
+    <div class="drag-hint" id="dragHint">drag to look around · scroll to zoom</div>
+
+    <div class="onscreen">
+      <div class="dpad">
+        <button class="up" data-k="w">▲</button>
+        <div class="center"></div>
+        <button class="left" data-k="a">◀</button>
+        <button class="right" data-k="d">▶</button>
+        <button class="down" data-k="s">▼</button>
+      </div>
+      <div class="actionpad">
+        <button class="engine" id="btnEngine">ENGINE (E)</button>
+        <div class="liftrow">
+          <button data-k="r">LIFT ▲ (R)</button>
+          <button data-k="f">LIFT ▼ (F)</button>
+        </div>
+        <button class="attach" id="btnAttach">ATTACH / RELEASE (Space)</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="panel">
+    <div class="panel-head">
+      <div class="eyebrow">Controls</div>
+      <h1>Run It Yourself</h1>
+      <p>There's no prompt list — use what you know about forklift operation. Wrong moves cost points but won't stop the run.</p>
+    </div>
+
+    <div class="legend">
+      <h3>Reference</h3>
+      <div class="legend-row"><span>Drive</span><kbd>W A S D</kbd></div>
+      <div class="legend-row"><span>Engine on/off</span><kbd>E</kbd></div>
+      <div class="legend-row"><span>Raise / Lower lift</span><kbd>R / F</kbd></div>
+      <div class="legend-row"><span>Attach / Release load</span><kbd>Space</kbd></div>
+    </div>
+
+    <div class="divider"></div>
+    <div class="scorebar">
+      <div class="score-box">
+        <div class="val ok" id="scoreVal">100</div>
+        <div class="lbl">Score</div>
+      </div>
+      <div class="score-box" style="text-align:right;">
+        <div class="val" id="deductVal" style="color:#8a887f;">0</div>
+        <div class="lbl">Deductions</div>
+      </div>
+    </div>
+
+    <div class="result-banner" id="resultBanner">
+      <div class="rank" id="resultRank">—</div>
+      <p id="resultText"></p>
+    </div>
+
+    <button class="act" id="restart">↺ &nbsp; Restart Shift</button>
+
+    <div class="activity-log">
+      <h3>Activity Log</h3>
+      <div class="log-list" id="logList"></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* ======================= GAME STATE ======================= */
+let state = {
+  score: 100,
+  deductions: 0,
+  startTime: null,
+  finished: false,
+  engineOn: false,
+  carrying: false,
+  liftHeight: 0.0,      // 0 = down, 1.7 = full raise
+  speed: 0,
+  lastUnsafeWarn: 0,
+  lastEngineWarn: 0,
+  begun: false,
+};
+
+const keys = {};
+
+function toast(msg, kind){
+  const t = document.createElement('div');
+  t.className = 'toast' + (kind ? ' ' + kind : '');
+  t.textContent = msg;
+  document.getElementById('toastLog').appendChild(t);
+  setTimeout(()=>t.remove(), 3400);
+  while (document.getElementById('toastLog').children.length > 4) document.getElementById('toastLog').removeChild(document.getElementById('toastLog').firstChild);
+}
+function logEntry(msg, kind){
+  const d = document.createElement('div');
+  if (kind) d.className = kind;
+  const t = state.startTime ? Math.floor((performance.now()-state.startTime)/1000) : 0;
+  d.textContent = `[${String(Math.floor(t/60)).padStart(2,'0')}:${String(t%60).padStart(2,'0')}] ${msg}`;
+  document.getElementById('logList').appendChild(d);
+}
+function note(msg, kind){ toast(msg, kind==='warn'?'warn':kind==='info'?'info':undefined); logEntry(msg, kind); }
+
+function applyDelta(delta, msg){
+  state.score = Math.max(0, Math.min(100, state.score + delta));
+  if (delta < 0) state.deductions += -delta;
+  note(msg, delta < 0 ? 'warn' : (delta>0?'ok':'info'));
+  refreshHUD();
+}
+
+function refreshHUD(){
+  document.getElementById('scoreVal').textContent = state.score;
+  document.getElementById('scoreVal').className = 'val ' + (state.score>=80?'ok':state.score>=60?'':'alert');
+  document.getElementById('deductVal').textContent = state.deductions;
+  document.getElementById('hudScore').textContent = state.score;
+  document.getElementById('hudScoreWrap').className = 'hud-stat' + (state.score<60?' alert':'');
+  document.getElementById('pillEngine').textContent = state.engineOn ? 'ENGINE ON' : 'ENGINE OFF';
+  document.getElementById('pillEngine').className = 'pill' + (state.engineOn?' on':'');
+  document.getElementById('pillLoad').textContent = state.carrying ? 'CARRYING LOAD' : 'NO LOAD';
+  document.getElementById('pillLoad').className = 'pill' + (state.carrying?' carrying':'');
+  document.getElementById('btnEngine').className = 'engine' + (state.engineOn?' on':'');
+}
+
+function finishRun(){
+  state.finished = true;
+  const rank = state.score>=90?'Superior':state.score>=70?'Master':state.score>=50?'Skilled':'Newbie';
+  document.getElementById('resultRank').textContent = 'Rank: ' + rank;
+  document.getElementById('resultText').textContent = `Pallet delivered. Final score ${state.score}/100, ${state.deductions} pts deducted. Time ${document.getElementById('hudTime').textContent}.`;
+  document.getElementById('resultBanner').classList.add('show');
+  note('Load placed in bay — shift complete. Rank: ' + rank, 'ok');
+}
+
+/* ======================= INPUT ======================= */
+window.addEventListener('keydown', e=>{
+  const k = e.key.toLowerCase();
+  keys[k] = true;
+  if (k === 'e') toggleEngine();
+  if (k === ' ') { e.preventDefault(); toggleAttach(); }
+});
+window.addEventListener('keyup', e=>{ keys[e.key.toLowerCase()] = false; });
+
+document.querySelectorAll('.dpad [data-k], .actionpad [data-k]').forEach(btn=>{
+  const k = btn.dataset.k;
+  const press = (ev)=>{ ev.preventDefault(); keys[k]=true; btn.classList.add('pressed'); };
+  const release = (ev)=>{ keys[k]=false; btn.classList.remove('pressed'); };
+  btn.addEventListener('mousedown', press); btn.addEventListener('touchstart', press, {passive:false});
+  btn.addEventListener('mouseup', release); btn.addEventListener('mouseleave', release); btn.addEventListener('touchend', release);
+});
+document.getElementById('btnEngine').addEventListener('click', toggleEngine);
+document.getElementById('btnAttach').addEventListener('click', toggleAttach);
+document.getElementById('restart').addEventListener('click', restartRun);
+document.getElementById('beginBtn').addEventListener('click', ()=>{
+  document.getElementById('briefing').style.display = 'none';
+  state.begun = true;
+  state.startTime = performance.now();
+  note('Shift started.', 'info');
+});
+
+function toggleEngine(){
+  if (!state.begun || state.finished) return;
+  state.engineOn = !state.engineOn;
+  note(state.engineOn ? 'Engine started.' : 'Engine stopped.', 'info');
+  refreshHUD();
+}
+
+function toggleAttach(){
+  if (!state.begun || state.finished) return;
+  if (!state.carrying){
+    // attempt pickup
+    if (!state.engineOn){ applyDelta(-5,'Attach failed — engine is off.'); return; }
+    const forkPos = forkWorldPosition();
+    const dist = forkPos.distanceTo(loadWorldPos);
+    if (dist > 1.6){ applyDelta(-10,'Attach failed — not lined up with the load.'); return; }
+    if (state.liftHeight > 0.35){ applyDelta(-10,'Attach failed — lift is not down.'); return; }
+    state.carrying = true;
+    scene.remove(load);
+    load.position.set(0,0.05,1.4); load.rotation.set(0,0,0);
+    carriage.add(load);
+    applyDelta(0,'Load secured.');
+  } else {
+    // attempt release
+    const distToBay = Math.hypot(forklift.position.x-DROP.x, forklift.position.z-DROP.z);
+    if (state.liftHeight > 0.35){ applyDelta(-10,'Release blocked — lower the lift first.'); return; }
+    carriage.remove(load);
+    const wp = new THREE.Vector3(); carriage.getWorldPosition(wp);
+    load.position.set(forklift.position.x + Math.sin(forklift.rotation.y)*1.6, 0.0, forklift.position.z + Math.cos(forklift.rotation.y)*1.6);
+    load.rotation.set(0,0,0);
+    scene.add(load);
+    loadWorldPos.copy(load.position);
+    state.carrying = false;
+    if (distToBay < 1.7){
+      finishRun();
+    } else {
+      applyDelta(-15,'Load dropped outside the bay — go recover it.');
+    }
+  }
+  refreshHUD();
+}
+
+function restartRun(){
+  state = {score:100, deductions:0, startTime:performance.now(), finished:false, engineOn:false, carrying:false, liftHeight:0, speed:0, lastUnsafeWarn:0, lastEngineWarn:0, begun:true};
+  document.getElementById('resultBanner').classList.remove('show');
+  document.getElementById('logList').innerHTML = '';
+  document.getElementById('hudTime').textContent = '00:00';
+  resetScene();
+  refreshHUD();
+  note('Restarted shift.', 'info');
+}
+
+/* ======================= THREE.JS SCENE ======================= */
+const viewport = document.getElementById('viewport');
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0x2c2b27, 20, 50);
+
+const camera = new THREE.PerspectiveCamera(46, viewport.clientWidth/viewport.clientHeight, 0.1, 100);
+camera.position.set(0, 6.5, 14.5);
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+renderer.setSize(viewport.clientWidth, viewport.clientHeight);
+renderer.shadowMap.enabled = true;
+viewport.appendChild(renderer.domElement);
+window.addEventListener('resize', ()=>{
+  camera.aspect = viewport.clientWidth/viewport.clientHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(viewport.clientWidth, viewport.clientHeight);
+});
+
+scene.add(new THREE.AmbientLight(0x8a8a86, 0.7));
+const sun = new THREE.DirectionalLight(0xfff2d6, 1.1);
+sun.position.set(8,14,6); sun.castShadow = true;
+sun.shadow.mapSize.set(1024,1024);
+sun.shadow.camera.left=-16; sun.shadow.camera.right=16; sun.shadow.camera.top=16; sun.shadow.camera.bottom=-16;
+scene.add(sun);
+
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(50,50), new THREE.MeshStandardMaterial({color:0x55534c, roughness:0.95}));
+floor.rotation.x = -Math.PI/2; floor.receiveShadow = true;
+scene.add(floor);
+
+function zoneMarker(x,z,color){
+  const ring = new THREE.Mesh(new THREE.RingGeometry(1.3,1.5,32), new THREE.MeshBasicMaterial({color, side:THREE.DoubleSide}));
+  ring.rotation.x = -Math.PI/2; ring.position.set(x,0.02,z);
+  scene.add(ring);
+}
+const PICKUP = {x:-5, z:3};
+const DROP = {x:6, z:-4};
+zoneMarker(PICKUP.x, PICKUP.z, 0xf4b400);
+zoneMarker(DROP.x, DROP.z, 0x3a8f5e);
+
+function shelf(x,z){
+  const g = new THREE.Group();
+  const post = new THREE.MeshStandardMaterial({color:0xe8590c, roughness:0.5, metalness:0.3});
+  [[-1,0],[1,0]].forEach(([dx])=>{
+    const p = new THREE.Mesh(new THREE.BoxGeometry(0.12,3.2,0.12), post);
+    p.position.set(x+dx,1.6,z); p.castShadow=true; g.add(p);
+  });
+  for (let y=0.6; y<3.2; y+=1.1){
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(2.3,0.08,0.5), new THREE.MeshStandardMaterial({color:0x2b2a28}));
+    beam.position.set(x,y,z); beam.castShadow=true; g.add(beam);
+  }
+  scene.add(g);
+}
+shelf(-10,-5); shelf(-10,-1); shelf(10,4); shelf(10,0);
+
+// load
+const load = new THREE.Group();
+const palletMat = new THREE.MeshStandardMaterial({color:0x8a6a3c, roughness:0.9});
+const pallet = new THREE.Mesh(new THREE.BoxGeometry(1.3,0.15,1.1), palletMat);
+pallet.position.y = 0.075; pallet.castShadow = true;
+load.add(pallet);
+for(let i=0;i<3;i++){
+  const b = new THREE.Mesh(new THREE.BoxGeometry(0.55,0.5,0.55), new THREE.MeshStandardMaterial({color:0xd9d2bd, roughness:0.8}));
+  b.position.set(-0.35+i*0.35, 0.4+(i%2)*0.5, 0); b.castShadow = true;
+  load.add(b);
+}
+load.position.set(PICKUP.x, 0, PICKUP.z);
+scene.add(load);
+let loadWorldPos = new THREE.Vector3(PICKUP.x,0,PICKUP.z);
+
+// forklift
+const forklift = new THREE.Group();
+const bodyMat = new THREE.MeshStandardMaterial({color:0xf4b400, roughness:0.55, metalness:0.2});
+const steelMat = new THREE.MeshStandardMaterial({color:0x2b2a28, roughness:0.6});
+const body = new THREE.Mesh(new THREE.BoxGeometry(1.6,0.9,2.4), bodyMat);
+body.position.y = 0.75; body.castShadow = true;
+forklift.add(body);
+const cab = new THREE.Mesh(new THREE.BoxGeometry(1.2,0.9,1.0), new THREE.MeshStandardMaterial({color:0x3a3936, roughness:0.4}));
+cab.position.set(0,1.55,-0.5); cab.castShadow = true;
+forklift.add(cab);
+[[-0.85,0.35,0.8],[0.85,0.35,0.8],[-0.85,0.35,-0.8],[0.85,0.35,-0.8]].forEach(([x,y,z])=>{
+  const w = new THREE.Mesh(new THREE.CylinderGeometry(0.35,0.35,0.3,16), steelMat);
+  w.rotation.z = Math.PI/2; w.position.set(x,y,z); w.castShadow = true;
+  forklift.add(w);
+});
+const mastGroup = new THREE.Group();
+mastGroup.position.set(0,0,1.5);
+forklift.add(mastGroup);
+[[-0.55],[0.55]].forEach(([x])=>{
+  const rail = new THREE.Mesh(new THREE.BoxGeometry(0.1,3.0,0.1), steelMat);
+  rail.position.set(x,1.5,0); rail.castShadow = true;
+  mastGroup.add(rail);
+});
+const carriage = new THREE.Group();
+carriage.position.set(0,0.2,0);
+mastGroup.add(carriage);
+carriage.add(new THREE.Mesh(new THREE.BoxGeometry(1.15,0.5,0.12), steelMat));
+[[-0.35],[0.35]].forEach(([x])=>{
+  const fork = new THREE.Mesh(new THREE.BoxGeometry(0.14,0.1,1.4), steelMat);
+  fork.position.set(x,-0.2,0.75); fork.castShadow = true;
+  carriage.add(fork);
+});
+const indicator = new THREE.Mesh(new THREE.SphereGeometry(0.08,12,12), new THREE.MeshBasicMaterial({color:0x552200}));
+indicator.position.set(0,1.9,-1.0);
+forklift.add(indicator);
+
+forklift.position.set(0, 0, 6);
+scene.add(forklift);
+
+// --- 3D map cursor: a floating arrow marking the forklift's position + heading,
+// visible only on the minimap (rendered on a layer the main camera ignores) ---
+const cursorGroup = new THREE.Group();
+const cursorCone = new THREE.Mesh(
+  new THREE.ConeGeometry(0.55, 1.3, 4),
+  new THREE.MeshBasicMaterial({color:0xe8590c})
+);
+cursorCone.rotation.x = Math.PI/2;      // point tip forward (+Z)
+cursorCone.rotation.z = Math.PI/4;      // diamond-facing for a crisp arrow silhouette
+cursorGroup.add(cursorCone);
+const cursorRing = new THREE.Mesh(
+  new THREE.RingGeometry(0.9,1.05,24),
+  new THREE.MeshBasicMaterial({color:0xf4b400, side:THREE.DoubleSide})
+);
+cursorRing.rotation.x = -Math.PI/2;
+cursorGroup.add(cursorRing);
+cursorGroup.position.y = 3.4;
+cursorGroup.traverse(o=>{ o.layers.set(1); });
+cursorGroup.layers.set(1);
+forklift.add(cursorGroup);
+
+function forkWorldPosition(){
+  const p = new THREE.Vector3();
+  carriage.getWorldPosition(p);
+  const dir = new THREE.Vector3(Math.sin(forklift.rotation.y), 0, Math.cos(forklift.rotation.y));
+  p.add(dir.multiplyScalar(0.8));
+  p.y = 0;
+  return p;
+}
+
+function resetScene(){
+  forklift.position.set(0,0,6); forklift.rotation.y = 0;
+  load.parent && load.parent.remove(load);
+  load.position.set(PICKUP.x,0,PICKUP.z); load.rotation.set(0,0,0);
+  scene.add(load);
+  loadWorldPos.set(PICKUP.x,0,PICKUP.z);
+  carriage.position.y = 0.2;
+}
+
+/* ======================= MINIMAP (tilted 3D camera + cursor) ======================= */
+const minimapCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+minimapCamera.layers.enable(1); // sees the cursor cone the main camera skips
+
+const MM_SIZE = 168, MM_PAD = 16;
+function positionMinimapFrame(){
+  const el = document.getElementById('minimapFrame');
+  el.style.width = MM_SIZE + 'px';
+  el.style.height = MM_SIZE + 'px';
+  el.style.top = MM_PAD + 'px';
+  el.style.right = MM_PAD + 'px';
+  const hint = document.getElementById('dragHint');
+  hint.style.top = (MM_PAD + MM_SIZE + 8) + 'px';
+  hint.style.right = MM_PAD + 'px';
+  hint.style.width = MM_SIZE + 'px';
+}
+positionMinimapFrame();
+window.addEventListener('resize', positionMinimapFrame);
+
+function renderMinimap(){
+  const dpr = renderer.getPixelRatio();
+  const w = viewport.clientWidth, h = viewport.clientHeight;
+  const size = MM_SIZE * dpr, pad = MM_PAD * dpr;
+  const x = w*dpr - size - pad;
+  const y = h*dpr - pad - size; // three.js viewport origin is bottom-left
+
+  minimapCamera.position.set(forklift.position.x, 13, forklift.position.z + 6.5);
+  minimapCamera.lookAt(forklift.position.x, 0, forklift.position.z);
+
+  renderer.setScissorTest(true);
+  renderer.setScissor(x, y, size, size);
+  renderer.setViewport(x, y, size, size);
+  minimapCamera.aspect = 1;
+  minimapCamera.updateProjectionMatrix();
+  renderer.render(scene, minimapCamera);
+  renderer.setScissorTest(false);
+}
+
+/* ======================= FREE-LOOK 3D CAMERA (drag to orbit) ======================= */
+let camYaw = 0, camPitch = 0.62, camDist = 8.5;
+let dragging = false, lastPX = 0, lastPY = 0, lastInputAt = 0;
+
+function orbitStart(x,y){
+  dragging = true; lastPX = x; lastPY = y; viewport.classList.add('dragging');
+  const hint = document.getElementById('dragHint');
+  if (hint) { hint.style.transition = 'opacity .6s'; hint.style.opacity = '0'; }
+}
+function orbitMove(x,y){
+  if (!dragging) return;
+  camYaw   -= (x - lastPX) * 0.006;
+  camPitch = Math.max(0.18, Math.min(1.25, camPitch + (y - lastPY) * 0.006));
+  lastPX = x; lastPY = y; lastInputAt = performance.now();
+}
+function orbitEnd(){ dragging = false; viewport.classList.remove('dragging'); }
+
+viewport.addEventListener('mousedown', e=>{ if (e.target.closest('.onscreen')) return; orbitStart(e.clientX, e.clientY); });
+window.addEventListener('mousemove', e=> orbitMove(e.clientX, e.clientY));
+window.addEventListener('mouseup', orbitEnd);
+viewport.addEventListener('touchstart', e=>{
+  if (e.target.closest('.onscreen')) return;
+  const t = e.touches[0]; orbitStart(t.clientX, t.clientY);
+}, {passive:true});
+viewport.addEventListener('touchmove', e=>{
+  const t = e.touches[0]; orbitMove(t.clientX, t.clientY);
+}, {passive:true});
+viewport.addEventListener('touchend', orbitEnd);
+viewport.addEventListener('wheel', e=>{
+  e.preventDefault();
+  camDist = Math.max(4.5, Math.min(17, camDist + e.deltaY*0.01));
+  lastInputAt = performance.now();
+}, {passive:false});
+
+/* ======================= LOOP ======================= */
+const clock = new THREE.Clock();
+function tick(){
+  const dt = Math.min(clock.getDelta(), 0.05);
+
+  if (state.begun && !state.finished){
+    const forward = (keys['w']||keys['arrowup']) ? 1 : (keys['s']||keys['arrowdown']) ? -1 : 0;
+    const turn = (keys['a']||keys['arrowleft']) ? 1 : (keys['d']||keys['arrowright']) ? -1 : 0;
+
+    if (forward !== 0 && !state.engineOn){
+      if (performance.now() - state.lastEngineWarn > 1500){ applyDelta(-5,'Tried to drive — engine is off.'); state.lastEngineWarn = performance.now(); }
+    }
+
+    const targetSpeed = state.engineOn ? forward * 2.6 : 0;
+    state.speed += (targetSpeed - state.speed) * Math.min(1, dt*3);
+    if (state.engineOn) forklift.rotation.y += turn * dt * 1.4 * (Math.abs(state.speed)>0.2?1:0.5);
+    forklift.position.x += Math.sin(forklift.rotation.y) * state.speed * dt;
+    forklift.position.z += Math.cos(forklift.rotation.y) * state.speed * dt;
+    forklift.position.x = Math.max(-16, Math.min(16, forklift.position.x));
+    forklift.position.z = Math.max(-16, Math.min(16, forklift.position.z));
+
+    const liftDir = keys['r'] ? 1 : keys['f'] ? -1 : 0;
+    state.liftHeight = Math.max(0, Math.min(1.7, state.liftHeight + liftDir * dt * 1.1));
+    carriage.position.y = 0.2 + state.liftHeight;
+
+    if (state.carrying && state.liftHeight > 1.0 && Math.abs(state.speed) > 0.3){
+      if (performance.now() - state.lastUnsafeWarn > 1200){ applyDelta(-5,'Unsafe — driving with the load raised.'); state.lastUnsafeWarn = performance.now(); }
+    }
+
+    if (state.engineOn){ forklift.position.y = Math.sin(performance.now()*0.02)*0.006; indicator.material.color.set(0x3fe07a); }
+    else { indicator.material.color.set(0x552200); }
+
+    const el = Math.floor((performance.now()-state.startTime)/1000);
+    document.getElementById('hudTime').textContent = String(Math.floor(el/60)).padStart(2,'0')+':'+String(el%60).padStart(2,'0');
+  }
+
+  // auto-recenter the free-look camera behind the forklift after a moment of no input
+  if (!dragging && performance.now() - lastInputAt > 2200){
+    const desiredYaw = forklift.rotation.y;
+    let diff = desiredYaw - camYaw;
+    while (diff > Math.PI) diff -= Math.PI*2;
+    while (diff < -Math.PI) diff += Math.PI*2;
+    camYaw += diff * Math.min(1, dt*1.2);
+    camPitch += (0.62 - camPitch) * Math.min(1, dt*1.2);
+  }
+
+  const horiz = camDist * Math.cos(camPitch);
+  const vert = camDist * Math.sin(camPitch);
+  const camOffset = new THREE.Vector3(-Math.sin(camYaw)*horiz, vert, -Math.cos(camYaw)*horiz);
+  const desiredCamPos = forklift.position.clone().add(camOffset);
+  camera.position.lerp(desiredCamPos, dragging ? 0.35 : 0.08);
+  const lookAt = forklift.position.clone(); lookAt.y += 1;
+  camera.lookAt(lookAt);
+
+  renderer.setViewport(0, 0, viewport.clientWidth*renderer.getPixelRatio(), viewport.clientHeight*renderer.getPixelRatio());
+  renderer.render(scene, camera);
+  renderMinimap();
+  requestAnimationFrame(tick);
+}
+tick();
+refreshHUD();
+</script>
+</body>
+</html>
